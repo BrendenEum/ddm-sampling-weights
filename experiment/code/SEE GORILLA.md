@@ -1,0 +1,1 @@
+Experiment is titled "Slot Machine Choice".
