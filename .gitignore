@@ -15,7 +15,7 @@ __pycache__
 */.ipynb_checkpoints/*
 *.pyc
 /dist/
-/data/
+/data/raw_data/
 /*.egg-info
 nipype_mem
 nilearn_cache
