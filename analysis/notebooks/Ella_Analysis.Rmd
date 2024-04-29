@@ -1,0 +1,782 @@
+---
+title: "Slot Machine Choice"
+output: html_notebook
+---
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(gganimate) 
+#root_dir <- '/Volumes/GoogleDrive-104956067703677467044/.shortcut-targets-by-id/1LJJVDrCVEdcxFlohyCVYNFSF0z_UoJq-/2023 Ella Onderdonk SURF' #laptop
+root_dir <- '/Users/ella/Library/CloudStorage/GoogleDrive-gonderdo@umich.edu/.shortcut-targets-by-id/1LJJVDrCVEdcxFlohyCVYNFSF0z_UoJq-/2023 Ella Onderdonk SURF' #desktop
+data_dir <- 'data'
+dataset <- read_csv(file.path(root_dir, data_dir, 'batch3_cumulative.csv'), show_col_types = FALSE)
+figdir <- 'figures'
+fig_height = 4
+fig_width = 6
+
+```
+
+
+#quality check
+```{r}
+# Check 1: Positive slope in psychometric curve for each participant
+check1 <- dataset %>%
+  filter(`Screen Name` == "stim 1") %>%
+  group_by(`Participant Private ID`, s, Response) %>%
+  summarise(count = n()) %>%
+  mutate(total = sum(count),
+         percent = count / total) %>%
+  filter(Response == "YES") %>%
+  arrange(`Participant Private ID`, s) %>%
+  group_by(`Participant Private ID`) %>%
+  mutate(slope_check = all(diff(percent) > 0)) %>%
+  summarise(slope_check = all(slope_check))
+
+# Check 2: Participants with at least 90% response rate
+check2 <- dataset %>%
+  filter(`Zone Type` %in% c("force_advance", "response_keyboard_single")) %>%
+  group_by(`Participant Private ID`) %>%
+  summarise(total_count = n(),
+            response_single_count = sum(`Zone Type` == "response_keyboard_single"),
+            response_rate = response_single_count / total_count) %>%
+  mutate(response_rate_check = response_rate >= 0.9)
+
+# Check 3: Average response time greater than 350ms
+check3 <- dataset %>%
+  filter(`Screen Name` == "stim 1") %>%
+  group_by(`Participant Private ID`, `Trial Number`) %>%
+  summarise(avg_reaction_time = mean(`Reaction Time`)) %>%
+  mutate(reaction_time_check = avg_reaction_time > 350) %>%
+  group_by(`Participant Private ID`) %>%
+  summarise(
+    passed_trials = sum(reaction_time_check),
+    total_trials = n()
+  ) %>%
+  mutate(check_result = passed_trials / total_trials >= 0.1)
+
+# View the results
+QC <- check1
+QC$response_rate <- check2$response_rate
+QC$response_rate_check <- check2$response_rate_check
+# QC$avg_RT <- check3$avg_reaction_time
+QC$RT_check <- check3$check_result
+
+QC
+
+# Print participant IDs of people who fail any of the three checks
+failed_checks <- unique(c(
+  ifelse(check1$slope_check == FALSE, check1$`Participant Private ID`, NA),
+  ifelse(check2$response_rate_check == FALSE, check2$`Participant Private ID`, NA),
+  ifelse(check3$reaction_time_check == FALSE, check3$`Participant Private ID`, NA)
+))
+
+failed_checks <- failed_checks[!is.na(failed_checks)]
+
+if (length(failed_checks) > 0) {
+  print(paste0("Participant IDs who failed the checks: ", paste(failed_checks, collapse = ", ")))
+} else {
+  print("All participants passed the checks.")
+}
+```
+
+```{r}
+# Create a new dataset called "good" with participants who passed the checks
+good <- dataset %>%
+  filter(!(`Participant Private ID` %in% failed_checks))
+
+# Save the dataset as a CSV file in the specified folder
+file_path <- file.path(root_dir, data_dir, "data.csv")
+write.csv(good, file = file_path, row.names = FALSE)
+
+exploratory_participants <- c(9040278, 9040291, 9061286, 9061240, 9061317, 9061321, 9061334, 9061380, 9061385, 9061386, 9061368, 9061388, 9061402, 9061404, 9061396, 9061394, 9061416, 9061429, 9061439, 9061450, 9061599, 9062131, 9040255, 9040290, 9040277)
+
+exploratory <- good %>%
+  filter(`Participant Private ID` %in% exploratory_participants)
+file_path <- file.path(root_dir, data_dir, "exploratory.csv")
+write.csv(exploratory, file = file_path, row.names = FALSE)
+
+confirmatory <- good %>%
+  filter(!(`Participant Private ID` %in% exploratory_participants))
+file_path <- file.path(root_dir, data_dir, "confirmatory.csv")
+write.csv(confirmatory, file = file_path, row.names = FALSE)
+
+confirmatory_unique_count <- confirmatory %>%
+  distinct(`Participant Private ID`) %>%
+  n_distinct()
+
+print(confirmatory_unique_count)
+
+```
+
+#data processing
+```{r}
+processed_data <- exploratory %>%
+  filter(`Screen Name` == "stim 1" & !is.na(`Participant Private ID`)) %>% #get response rows only
+  select(`Participant Private ID`, `Trial Number`, Response, `Reaction Time`, s, e, `Correct`, size)
+
+colnames(processed_data)[1:6] <- c("subj", "trial", "choice", "rxn_time", "machines", "stim")
+
+processed_data$subj <- factor(processed_data$subj, levels = unique(processed_data$subj[!is.na(processed_data$subj)]), labels = seq_along(unique(processed_data$subj[!is.na(processed_data$subj)])))
+
+#remove practice trials
+processed_data <- processed_data %>%
+  group_by(subj) %>%
+  slice(-(1:10)) %>%
+  ungroup()
+
+processed_data$machines <- processed_data$machines - 3 #change slot machine label to slot machine mean
+
+```
+
+#creating preliminary data
+```{r}
+#summarize probability of choosing yes and reaction time by participant for each slot machine
+pdata <- processed_data %>% 
+  group_by(subj, machines) %>%
+  summarize(
+    percent.choice = mean(Correct),
+    se_percent.choice = sd(Correct) / sqrt(n()),
+    avg_rxn = mean(rxn_time),
+    se_avg_rxn = sd(rxn_time) / sqrt(n()),
+    avg_machine_val = mean(sapply(stim, function(x) {
+      vals <- as.numeric(strsplit(gsub("[c\\(\\)]", "", x), ", ")[[1]])
+      mean(vals)
+    })),
+    se_avg_machine_val = sd(sapply(stim, function(x) {
+      vals <- as.numeric(strsplit(gsub("[c\\(\\)]", "", x), ", ")[[1]])
+      mean(vals)
+    })) / sqrt(n())
+  )
+```
+
+```{r}
+smallest_rxn <- min(processed_data$rxn_time)
+smallest_rxn
+
+summary(processed_data$rxn_time)
+```
+
+
+```{r}
+#summarize probability of choosing yes and reaction time by slot machine across all participants
+machine_data <- pdata %>%
+  group_by(machines) %>%
+  summarize(
+    machine_mean = mean(avg_rxn),
+    se_machine_mean = sd(avg_rxn) / sqrt(n()),
+    percent_choice = mean(percent.choice),
+    se_percent_choice = sd(percent.choice) / sqrt(n()))
+
+```
+
+#analysis data
+```{r}
+#get thenumber of samples seen in each trial; each sample/stim was displayed for 200ms with 100ms inter-stim interval
+threshold <- 100 #count a stim as seen if it was onscreen for at least 100ms before choice
+adata <- processed_data %>%
+  group_by(subj, machines, rxn_time) %>% 
+  mutate(
+    StimuliSeen = ifelse((rxn_time / 300) %% 1 >= threshold, ceiling(rxn_time / 300), floor(rxn_time / 300))
+  )
+
+adata <- adata %>% #get sample values for StimuliSeen
+  rowwise() %>%
+  mutate(
+    stim = paste(unlist(strsplit(substr(stim, 3, nchar(stim)), ", "))[1:StimuliSeen], collapse = ", ")
+  ) %>%
+  ungroup()
+
+#readr imported trial data numbers as chr
+adata$trial <- as.numeric(adata$trial)
+#trials 1-10 were practice and removed
+adata$trial <- adata$trial - 10
+```
+
+```{r}
+#lookup table to bin samples, same as stim generation
+lookup_table <- data.frame(
+  lower_bound = c(-Inf, -2.75, -2.5, -2.25, -2, -1.75, -1.5, -1.25, -1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75),
+  upper_bound = c(-2.75, -2.5, -2.25, -2, -1.75, -1.5, -1.25, -1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, Inf),
+  stimulus = c(-2.875, -2.625, -2.375, -2.125, -1.875, -1.625, -1.375, -1.125, -0.875, -0.625, -0.375, -0.125, 0.125, 0.375, 0.625, 0.875, 1.125, 1.375, 1.625, 1.875, 2.125, 2.375, 2.625, 2.875))
+
+# Loop over each row in the data frame
+for (i in 1:nrow(adata)) {
+  # Split the existing "stim" value into separate elements
+  stim_values <- unlist(strsplit(substr(adata$stim[i], 3, nchar(adata$stim[i])), ", "))
+  
+  # Find the matching stimuli based on the "stim" values
+  updated_stimuli <- character(length(stim_values))
+  for (j in 1:length(stim_values)) {
+    stim_value <- as.numeric(stim_values[j])
+    stim_index <- findInterval(stim_value, lookup_table$lower_bound)
+    updated_stimuli[j] <- as.character(lookup_table$stim[stim_index])
+  }
+  
+  # Combine the updated stimuli into a single string and assign it to the "stim" column
+  adata$stim[i] <- paste(updated_stimuli, collapse = ", ")
+}
+
+# Remove rows where "choice" column is equal to "NA"
+adata <- adata[!is.na(adata$choice), ]
+```
+
+```{r}
+adata_long <- adata %>%
+  separate_rows(stim, sep = ", ") %>%
+  mutate(stim = as.numeric(stim))
+
+adata_long <- adata_long %>% # lines 231-234: get nth/nth-from-last stim seen for each trial; bin all n>3 together
+  group_by(subj, trial) %>%
+  mutate(
+    Sample_last = last(stim),
+    Sample_second = ifelse(length(stim) > 1, stim[length(stim) - 1], NA),
+    Sample_third = ifelse(length(stim) > 2, stim[length(stim) - 2], NA),
+    Sample_else = ifelse(length(stim) > 3, mean(stim[1:(length(stim) - 3)]), NA),
+    Sample_1 = stim[1],
+    Sample_2 = ifelse(length(stim) > 1, stim[2], NA),
+    Sample_3 = ifelse(length(stim) > 2, stim[3], NA),
+    Sample_rest = ifelse(length(stim) > 3, mean(stim[4:length(stim)]), NA),
+  ) %>%
+  ungroup()
+
+adata$Sample_last <- adata_long$Sample_last[match(adata$trial, adata_long$trial)]
+adata$Sample_second <- adata_long$Sample_second[match(adata$trial, adata_long$trial)]
+adata$Sample_third <- adata_long$Sample_third[match(adata$trial, adata_long$trial)]
+adata$Sample_else <- adata_long$Sample_else[match(adata$trial, adata_long$trial)]
+adata$Sample_1 <- adata_long$Sample_1[match(adata$trial, adata_long$trial)]
+adata$Sample_2 <- adata_long$Sample_2[match(adata$trial, adata_long$trial)]
+adata$Sample_3 <- adata_long$Sample_3[match(adata$trial, adata_long$trial)]
+adata$Sample_rest <- adata_long$Sample_rest[match(adata$trial, adata_long$trial)]
+
+```
+
+#visualize stimuli seen
+```{r}
+adata_long %>%
+  group_by(subj, trial) %>%
+  summarise(.groups = "keep",
+            StimuliSeen = unique(StimuliSeen)) %>% #number of unique stimuli seen in each trial
+  ggplot(aes(StimuliSeen)) +
+  geom_histogram(bins = 30)
+```
+
+```{r}
+adata_long %>%
+  group_by(subj, trial) %>%
+  summarise(.groups = "keep",
+            StimuliSeen = unique(StimuliSeen)) %>%
+  ungroup() %>%
+  summarise(StimSeenMean = mean(StimuliSeen),
+            StimSeenMedian = median(StimuliSeen))
+```
+
+
+#adata for last/first plots
+```{r}
+adata_last <- adata %>%
+  pivot_longer(cols = c(Sample_last, Sample_second, Sample_third, Sample_else), names_to = "sig_type", values_to = "sig_val") %>%
+  group_by(across(-c(sig_type, sig_val))) %>%
+  fill(everything(), .direction = "down") %>% #filling additional rows added during pivot with the correct "sig_type" and "sig_val" values
+  ungroup()
+
+adata_last$sig_type = factor(adata_last$sig_type, levels = c("Sample_last", "Sample_second", "Sample_third", "Sample_else"), labels = c("Sample_last", "Sample_second", "Sample_third", "Sample_else"))
+```
+
+```{r}
+adata_first <- adata %>%
+  pivot_longer(cols = c(Sample_1, Sample_2, Sample_3, Sample_rest), names_to = "sig_type", values_to = "sig_val") %>%
+  group_by(across(-c(sig_type, sig_val))) %>%
+  fill(everything(), .direction = "down") %>% #filling additional rows added during pivot with the correct "sig_type" and "sig_val" values
+  ungroup()
+
+adata_first$sig_type = factor(adata_first$sig_type, levels = c("Sample_1", "Sample_2", "Sample_3", "Sample_rest"), labels = c("Sample_1", "Sample_2", "Sample_3", "Sample_rest"))
+```
+
+
+```{r}
+adata_last <- adata_last%>%
+  mutate(yes_chosen = ifelse(choice == "YES", 1, 0))
+
+last <- ggplot(data = adata_last, aes(x = sig_val, y = yes_chosen, color = sig_type)) +
+  geom_hline(aes(yintercept = 0.5)) +
+  geom_vline(aes(xintercept = 0)) +
+  geom_line(stat="smooth", method = "glm", method.args = list(family = "binomial"), formula = "y ~ x", se = FALSE, linewidth = 1.5, fullrange = T) +
+  theme(legend.position = "bottom") +
+  theme_bw() +
+  labs(y = "p(Yes)", 
+       x = "Stimuli Value",
+       color = "Stimuli Type") +
+  theme_bw() +
+  ylim(0,1) +
+  coord_cartesian(expand = F) +
+  guides(fill = "none")
+last
+```
+```{r}
+adata_last = adata_last %>%
+  mutate(yes_chosen = ifelse(choice == "YES", 1, 0))
+m = glm(yes_chosen ~ sig_type * sig_val, data = adata_last, family = binomial(link = "logit"))
+summary(m)
+```
+
+```{r}
+adata_first <- adata_first%>%
+  mutate(yes_chosen = ifelse(choice == "YES", 1, 0))
+
+first <- ggplot(data = adata_first, aes(x = sig_val, y = yes_chosen, color = sig_type)) +
+  geom_hline(aes(yintercept = 0.5)) +
+  geom_vline(aes(xintercept = 0)) +
+  geom_line(stat="smooth", method = "glm", method.args = list(family = "binomial"), formula = "y ~ x", se = FALSE, linewidth = 1.5, fullrange = T) +
+  theme(legend.position = "bottom") +
+  theme_bw() +
+  labs(y = "p(Yes)", 
+       x = "Stimuli Value",
+       color = "Stimuli Type") +
+  theme_bw() +
+  ylim(0,1) +
+  coord_cartesian(expand = F) +
+  guides(fill = "none")
+first
+```
+```{r}
+adata_first = adata_first %>%
+  mutate(yes_chosen = ifelse(choice == "YES", 1, 0))
+m = glm(yes_chosen ~ sig_type * sig_val, data = adata_first, family = binomial(link = "logit"))
+summary(m)
+```
+
+```{r}
+#make a new column for cumulative averages at Sample_last, Sample_second, Sample_third, Sample_else
+adata_last <- adata_last%>%
+  group_by(subj, trial) %>%
+  mutate(cumulative_avg = rev(cummean(rev(sig_val)))) %>%
+  ungroup()
+
+#and make same graph as above but with that as x axis
+last_cumulative <- ggplot(data = adata_last, aes(x = cumulative_avg, y = yes_chosen, color = sig_type)) +
+  geom_hline(aes(yintercept = 0.5)) +
+  geom_vline(aes(xintercept = 0)) +
+  geom_line(stat="smooth", method = "glm", method.args = list(family = "binomial"), formula = "y ~ x", se = FALSE, linewidth = 1.5, fullrange = T) +
+  theme(legend.position = "bottom") +
+  theme_bw() +
+  labs(y = "p(Yes)", 
+       x = "Cumulative Average Stimulus",
+       color = "Stimuli Type") +
+  theme_bw() +
+  ylim(0,1) +
+  coord_cartesian(expand = F) +
+  guides(fill = "none")
+last_cumulative
+```
+explain S0, S1, S2, Selse
+emphasize the intercept (ppl are more likely to say no)
+
+```{r}
+adata_last = adata_last %>%
+  mutate(yes_chosen = ifelse(choice == "YES", 1, 0))
+m = glm(yes_chosen ~ sig_type * cumulative_avg, data = adata_last, family = binomial(link = "logit"))
+summary(m)
+```
+
+```{r}
+#make a new column for cumulative averages at Sample_1, Sample_2, Sample_3, Sample_rest
+adata_first <- adata_first%>%
+  group_by(subj, trial) %>%
+  mutate(cumulative_avg = rev(cummean(rev(sig_val)))) %>%
+  ungroup()
+
+#and make same graph as above but with that as x axis
+first_cumulative <- ggplot(data = adata_first, aes(x = cumulative_avg, y = yes_chosen, color = sig_type)) +
+  geom_hline(aes(yintercept = 0.5)) +
+  geom_vline(aes(xintercept = 0)) +
+  geom_line(stat="smooth", method = "glm", method.args = list(family = "binomial"), formula = "y ~ x", se = FALSE, linewidth = 1.5, fullrange = T) +
+  theme(legend.position = "bottom") +
+  theme_bw() +
+  labs(y = "p(Yes)", 
+       x = "Cumulative Average Stimulus",
+       color = "Stimuli Type") +
+  theme_bw() +
+  ylim(0,1) +
+  coord_cartesian(expand = F) +
+  guides(fill = "none")
+first_cumulative
+```
+```{r}
+adata_first = adata_first %>%
+  mutate(yes_chosen = ifelse(choice == "YES", 1, 0))
+m = glm(yes_chosen ~ sig_type * cumulative_avg, data = adata_first, family = binomial(link = "logit"))
+summary(m)
+```
+
+#adata for AVG SIGNAL PlOT
+```{r}
+adata_long_graph <- adata_long %>%
+  select(subj, trial, choice, rxn_time, machines, StimuliSeen, stim) %>%
+  group_by(subj, trial) %>%
+  mutate(
+    time = row_number(),
+    avg_sig_raw = cummean(stim),
+    avg_sig_all = mean(stim)) %>%
+  complete(time = (1:40), fill = list(NA)) %>%
+  fill(choice) %>% #lines 421-427: filling additional rows added when creating a new row for every 300ms of the trial and pasting the existing values down within their columns by trial
+  fill(rxn_time) %>%
+  fill(machines) %>%
+  fill(StimuliSeen) %>%
+  fill(stim) %>%
+  fill(avg_sig_raw) %>%
+  fill(avg_sig_all) %>%
+  mutate(
+    time = (time*300)/1000,
+    choice = ifelse(row_number() <= (StimuliSeen - 1), "UND", choice)) %>%
+  ungroup()
+
+```
+
+```{r}
+# Lookup table to bin average signal at each time point more coarsely for plotting
+lookup_table <- data.frame(
+  lower_bound = c(-Inf, -3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5),
+  upper_bound = c(-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5, Inf),
+  stimulus = c(-4, -3, -2, -1, 0, 1, 2, 3, 4)
+)
+
+adata_long_graph <- adata_long_graph %>%
+  mutate(avg_sig = cut(avg_sig_all, breaks = c(lookup_table$lower_bound, Inf), labels = lookup_table$stimulus, include.lowest = TRUE))
+```
+
+```{r}
+adata_long_yes <- adata_long_graph %>%
+  group_by(subj, avg_sig, time) %>%
+  mutate(
+    percent_ind = mean(choice == "YES" & choice != "UND" & choice != "NO")) %>% #p(Yes) for each individual participant
+  ungroup()
+
+adata_long_yes <- adata_long_yes %>%
+  group_by(avg_sig, time) %>%
+  mutate(
+    percent_choice = mean(percent_ind)) %>% #p(Yes) for all participants averaged
+  ungroup()
+
+avg_sig_yes <- ggplot(data = adata_long_yes, aes(x = time, y = percent_choice, group = avg_sig)) +
+  geom_line(linewidth=2, aes(color = as.factor(avg_sig))) +
+  labs(y = "p(Yes)", 
+       x = "Time (seconds)",
+       color = "Average Stimulus") +
+  theme_bw() +
+  coord_cartesian(expand = F) +
+  guides(fill = "none") +
+  guides(color = guide_legend(reverse = TRUE)) +
+  theme(legend.position = "right")
+avg_sig_yes
+```
+
+```{r}
+adata_long_no <- adata_long_graph %>%
+  group_by(subj, avg_sig, time) %>%
+  mutate(
+    percent_ind = mean(choice == "NO" & choice != "UND" & choice != "YES")) %>% #p(No) for each individual participant
+  ungroup()
+
+adata_long_no <- adata_long_no %>%
+  group_by(avg_sig, time) %>%
+  mutate(
+    percent_choice = mean(percent_ind)) %>% #p(No) for all participants averaged
+  ungroup()
+
+avg_sig_no <- ggplot(data = adata_long_no, aes(x = time, y = percent_choice, group = avg_sig)) +
+  geom_line(linewidth=2, aes(color = as.factor(avg_sig))) +
+  labs(y = "p(No)", 
+       x = "Time (seconds)",
+       color = "Average Stimulus") +
+  theme_bw() +
+  coord_cartesian(expand = F) +
+  guides(fill = "none") +
+  guides(color = guide_legend(reverse = TRUE)) +
+  theme(legend.position = "right") +
+  scale_y_reverse()
+avg_sig_no
+
+```
+
+```{r}
+adata_long_und <- adata_long_graph %>%
+  group_by(subj, avg_sig, time) %>%
+  mutate(
+    percent_ind = mean(choice == "UND" & choice != "NO" & choice != "YES")) %>% #p(Und) for each individual participant
+  ungroup()
+
+adata_long_und <- adata_long_und %>%
+  group_by(avg_sig, time) %>%
+  mutate(
+    percent_choice = mean(percent_ind)) %>% #p(Und) for all participants averaged
+  ungroup()
+
+avg_sig_und <- ggplot(data = adata_long_und, aes(x = time, y = percent_choice, group = avg_sig)) +
+  geom_line(linewidth=2, aes(color = as.factor(avg_sig))) +
+  labs(y = "p(Und)", 
+       x = "Time (seconds)",
+       color = "Average Stimulus") +
+  theme_bw() +
+  coord_cartesian(expand = F) +
+  guides(fill = "none") +
+  guides(color = guide_legend(reverse = TRUE)) +
+  theme(legend.position = "right")
+avg_sig_und
+
+```
+
+```{r}
+ddm_evidences <- c(1.70668658332501, 3.38364364575957, 1.67553912139694, 2.40450513763694, 2.77673136042604, 4.5860627521724, 2.79171791253149, 2.62079960265789, -0.118220783720434, 2.46765214391298, 1.51450117642642, 4.79503704601985, 1.30100458385745, 1.80258578758251, 2.41903867047727, -1.81952956013882, 3.0454290473421, 1.23147892186556, 3.99992620928263, 4.95478126444822, 0.417037341847752, 3.07469353875615, -1.12012302176036, 0.58329200338313, 2.31794818709791, -2.00134098646743, 1.71918415032277, 1.91363753621354,
+2.7782236599797, -1.05499441017458, 4.7828473533479, 2.66932848923104, 1.62337750757716, 1.00290647052324, 2.05753186602713, 1.55329587794438, 4.35942233433914, -0.725039347614847, 1.75124822658523, 0.232426689347767) #example values pulled from test run of task
+
+sim_trial <- function(stim = c(1,1), d = 2, s = 2, b = 0, ndt = .1, a = 1, dt = .1, maxTime=40, warning=T) {
+
+  # Convert to dt space.
+  d = d*dt
+  s = s*dt
+
+  # Initiate process.
+  E_list = c()
+  ind = 1
+  E = b
+  E_list[ind] = E
+
+  # Non-decision time.
+  time = ceiling(ndt/dt)
+
+  # Diffusion.
+  timeout = F
+  while (abs(E) < a) {
+    time = time + 1
+    ind = ind + 1
+    epsilon = rnorm(1, mean=0, sd=s)
+    E = E + d*(stim[ind-1]) + epsilon
+    E_list[ind] = E
+    if (time>(maxTime*(1/dt))) {
+      timeout = T
+      break
+    }
+  }
+  
+  # Record choice and response time. Don't forget to convert back to seconds.
+  time = time*dt
+  if (timeout) {
+    if (warning==T) {print("Simulation timed out.")}
+    return(list(choice=NA, rt=NA, E_list=NA))
+  }
+  if (E>a) { return(list(choice=1, rt=time, E_list=E_list)) }
+  if (E<-a) { return(list(choice=0, rt=time, E_list=E_list)) }
+}
+set.seed(3)
+simulated_trial = sim_trial(stim = ddm_evidences, d = 0.2, s = 0.55, b = 0, ndt = .1, a = 1, dt = .1, maxTime=40, warning=T)
+
+simulated_trial$E_listl
+
+sample <- unlist(simulated_trial$E_list)
+time <- (c(1:length(sample)))*.3
+sample_data <- data.frame(rdv = sample, time = time)
+
+simulation <- sample_data %>%
+  ggplot() +
+    geom_vline(xintercept = 0) +
+    geom_hline(yintercept=0) +
+    geom_hline(yintercept=1) +
+    geom_hline(yintercept=-1) +
+    geom_point(aes(x = time, y = rdv), alpha = 1) +
+    geom_line(aes(x = time, y = rdv)) +
+    theme_minimal() +
+    theme(legend.position = "bottom") + guides(size = "none") +
+    labs(x = "time (s)", y = "rdv") +
+    ylim(c(-1,1))+
+    transition_reveal(time) 
+animate(simulation, duration = 34/3, fps = 3, width = 200, height = 200, renderer = gifski_renderer())
+
+#animation must be saved manually
+```
+
+#basic data plots
+```{r}
+#x = SM, y = %chosen
+p.choice <- ggplot(data = pdata, aes(x = machines, y = percent.choice, group = subj)) +
+  geom_line(linewidth=2, aes(color = as.factor(subj))) +
+  geom_ribbon(aes(ymin = percent.choice - se_percent.choice, ymax = percent.choice + se_percent.choice, fill = subj), 
+              alpha = 2.5/10) +
+  labs(title = "How Often Individual Participants Chose to Play Each Machine",
+       y = "% Time YES Chosen", 
+       x = "Average Machine Payout",
+       color = "Participants") +
+  theme_bw() +
+  coord_cartesian(expand = F) +
+  guides(fill = "none") +
+  theme(legend.position = "right")
+p.choice
+```
+
+```{r}
+#mean
+p.machine_choice <- ggplot(data = machine_data, aes(x = machines, y = percent_choice)) +
+  geom_hline(aes(yintercept = 0.5), alpha = 0.25) +
+  geom_vline(aes(xintercept = 0), alpha = 0.25) +
+  geom_line(color = "purple", linewidth = 2) +
+  geom_ribbon(aes(ymin = percent_choice - se_percent_choice, ymax = percent_choice + se_percent_choice), 
+              fill = "purple", alpha = 2.5/10) +
+  labs(y = "p(Yes)", 
+       x = "Slot Machine Mean Payout") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  ylim(0,1) +
+  coord_cartesian(expand = FALSE) +
+  guides(fill = "none")
+p.machine_choice
+```
+
+```{r}
+#x = SM, y = RT
+p.RT <- ggplot(data = pdata, aes(x = machines, y = avg_rxn, group = subj)) +
+  geom_ribbon(aes(ymin = avg_rxn - se_avg_rxn, ymax = avg_rxn + se_avg_rxn, fill = subj), alpha = 2.5/10) +
+  geom_line(linewidth=2, aes(color = subj)) +
+  labs(title = "Individual Participant Reaction Time for Each Machine",
+       y = "Average Reaction Time (ms)", 
+       x = "Average Machine Payout",
+       color = "Participants") +
+  theme_bw() +
+  coord_cartesian(expand = F) +
+  guides(fill = "none") +
+  theme(legend.position = "right")
+p.RT
+```
+
+```{r} 
+#mean
+p.machine_RT <- ggplot(data = machine_data, aes(x = machines, y = machine_mean)) +
+  geom_vline(aes(xintercept = 0), alpha = 0.25) +
+  geom_line(color = "blue", size = 2) +
+  geom_ribbon(aes(ymin = machine_mean - se_machine_mean, ymax = machine_mean + se_machine_mean), 
+              fill = "blue", alpha = 0.25) +
+  labs(y = "Average Reaction Time (ms)", 
+       x = "Slot Machine Mean Payout") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  ylim(0, 3500) +
+  coord_cartesian(expand = FALSE) +
+  guides(fill = "none")
+p.machine_RT
+```
+
+```{r}
+#x = avg machine value, y = percent choice
+p.avg_stim <- ggplot(data = pdata, aes(x = avg_machine_val, y = percent.choice, group = subj)) +
+  geom_line(color = "purple", linewidth = 2) +
+  geom_ribbon(aes(ymin = percent.choice - se_percent.choice, ymax = percent.choice + se_percent.choice), 
+              fill = "purple", alpha = 2.5/10) +
+  labs(title = "How Often Participants Chose to Play Based on Average Machine Payout",
+       y = "% Time YES Chosen", 
+       x = "Average Machine Payout") +
+  theme_bw() +
+  coord_cartesian(expand = F) +
+  guides(fill = "none") +
+  theme(legend.position = "right")
+p.avg_stim
+
+```
+
+#save graphs
+```{r}
+ggsave(file.path(root_dir, figdir, "p.RT.png"), plot = p.RT, 
+       width = fig_width, height = fig_height, units = "in")
+
+ggsave(file.path(root_dir, figdir, "p.choice.png"), plot = p.choice, 
+       width = fig_width, height = fig_height, units = "in")
+
+ggsave(file.path(root_dir, figdir, "p.machine_RT.png"), plot = p.machine_RT, 
+       width = fig_width, height = fig_height, units = "in")
+
+ggsave(file.path(root_dir, figdir, "p.machine_choice.png"), plot = p.machine_choice, 
+       width = fig_width, height = fig_height, units = "in")
+
+ggsave(file.path(root_dir, figdir, "avg_sig_yes.png"), plot = avg_sig_yes, 
+       width = fig_width, height = fig_height, units = "in")
+
+ggsave(file.path(root_dir, figdir, "avg_sig_no.png"), plot = avg_sig_no, 
+       width = fig_width, height = fig_height, units = "in")
+
+ggsave(file.path(root_dir, figdir, "avg_sig_und.png"), plot = avg_sig_und, 
+       width = fig_width, height = fig_height, units = "in")
+
+ggsave(file.path(root_dir, figdir, "last.png"), plot = last, 
+       width = fig_width, height = fig_height, units = "in")
+
+ggsave(file.path(root_dir, figdir, "last_cumulative.png"), plot = last_cumulative, 
+       width = fig_width, height = fig_height, units = "in")
+
+ggsave(file.path(root_dir, figdir, "first.png"), plot = first, 
+       width = fig_width, height = fig_height, units = "in")
+
+ggsave(file.path(root_dir, figdir, "first_cumulative.png"), plot = first_cumulative, 
+       width = fig_width, height = fig_height, units = "in")
+```
+
+
+#extra preliminary things we tried/messed around with
+```{r}
+p.pilot.machine_choice <- ggplot(data = machine_data, aes(x = machines, y = percent_choice)) +
+  geom_bar(stat = "identity", aes(fill = machines)) +
+  geom_text(aes(label = paste0(round(percent_choice*100, 1), "%"), vjust = 2)) +
+  labs(title = "How Often Participants Chose to Play Each Machine On Average",
+       y = "% of Time YES Chosen", 
+       x = "Average Machine Payout") +
+  theme_bw() +
+  coord_cartesian(expand = F) +
+  guides(fill = "none")
+p.pilot.machine_choice
+
+p.pilot.machine_RT <- ggplot(data = machine_data, aes(x = machines, y = machine_mean)) +
+  geom_bar(stat = "identity", aes(fill = machines)) +
+  geom_text(aes(label = paste0(round(machine_mean), " ms"), vjust = 2)) +
+  labs(title = "Average Participant Reaction Time for Each Machine",
+       y = "Average Reaction Time (ms)", 
+       x = "Average Machine Payout") +
+  theme_bw() +
+  coord_cartesian(expand = F) +
+  guides(fill = "none")
+p.pilot.machine_RT
+
+p.pilot.machine_RT <- ggplot(data = machine_data, aes(x = machines, y = machine_mean)) +
+  geom_line(color = "blue", size = 2, group = 1) +
+  geom_ribbon(aes(ymin = machine_mean - se_machine_mean, ymax = machine_mean + se_machine_mean, fill = "machines"), 
+              alpha = 0.75) +
+  geom_errorbar(aes(ymin = machine_mean - se_machine_mean, ymax = machine_mean + se_machine_mean),
+                width = 0.2, color = "blue", size = 1) +
+  labs(title = "Average Machine Payout",
+       y = "Average Percent Choice", 
+       x = "Average Machine Payout") +
+  theme_bw() +
+  coord_cartesian(expand = FALSE) 
+#guides(fill = "none")
+
+p.pilot.machine_RT
+
+
+#linear regression
+
+library(ggplot2)
+
+lmChoice = lm(percent.choice~machines, data = pdata) #Create the linear regression
+summary(lmChoice)
+ggplot(data = pdata, aes(x = machines, y = percent.choice)) +
+  geom_point(color = "blue") +
+  geom_abline(intercept = lmChoice$coefficients[1], slope = lmChoice$coefficients[2]) +
+  labs(x = "Machines", y = "Percent Choice") # Add labels to axes
+plot(lmChoice$residuals, pch = 16, col = "red")
+
+lmStim = lm(percent.choice~avg_machine_val, data = pdata) #Create the linear regression
+summary(lmChoice)
+ggplot(data = pdata, aes(x = avg_machine_val, y = percent.choice)) +
+  geom_point(color = "purple") +
+  geom_abline(intercept = lmStim$coefficients[1], slope = lmStim$coefficients[2]) +
+  labs(x = "Average Machine Payout", y = "Percent Choice") # Add labels to axes
+plot(lmChoice$residuals, pch = 16, col = "orange")
+```
+
+
+

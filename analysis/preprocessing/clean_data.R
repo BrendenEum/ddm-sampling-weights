@@ -66,7 +66,11 @@ data = data[,.voi]
 data$raw_sample = gsub("c|\\(|\n|\\)", "", data$raw_sample)
 data = separate_rows(data, raw_sample, sep = ",")
 data$raw_sample = as.numeric(data$raw_sample)
-data$sample = data$raw_sample %>% round(0)
+breaks = c(-Inf, -2.75, -2.5, -2.25, -2, -1.75, -1.5, -1.25, -1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, Inf) # see Ella_Analysis.Rmd for how raw_samples were converted to dot sizes.
+labels = c(-2.875, -2.625, -2.375, -2.125, -1.875, -1.625, -1.375, -1.125, -0.875, -0.625, -0.375, -0.125, 0.125, 0.375, 0.625, 0.875, 1.125, 1.375, 1.625, 1.875, 2.125, 2.375, 2.625, 2.875)
+data$sample <- cut(data$raw_sample, breaks=breaks, labels=labels) %>%
+  as.character() %>%
+  as.numeric()
 
 
 ############################

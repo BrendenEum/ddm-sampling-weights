@@ -20,11 +20,7 @@ load(file.path(.datadir, "exploratory", "data.RData"))
 # Data for plot
 ############################
 
-breaks <- seq(-5, 5, 2)#breaks <- seq(-2.5, 2.5, 1)
-labels <- seq(-4, 4, 2)#labels <- seq(-2, 2, 1)
-data$sample_bin <- cut(data$sample, breaks=breaks, labels=labels) %>%
-  as.character() %>%
-  as.numeric()
+data$sample_bin <- data$sample %>% round()
 
 data = data %>%
   group_by(parcode, trial) %>%
