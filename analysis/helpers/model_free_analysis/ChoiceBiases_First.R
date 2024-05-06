@@ -13,14 +13,12 @@ library(tidyverse)
 library(ggsci)
 source(file.path(.utildir,"getAllUtilities.R"))
 
-load(file.path(.datadir, "exploratory", "data.RData"))
+load(file.path(.datadir, dataset, "data.RData"))
 
 
 ############################
 # Data for plot
 ############################
-
-data$sample_bin <- data$sample %>% round()
 
 pdata = data[data$firstSample==T, ] %>%
   group_by(parcode, slot_mean, sample_bin) %>%
@@ -39,7 +37,7 @@ pdata = na.omit(pdata)
 # Plot
 ############################
 
-p.ChoiceBiases.FirstSampleBias = ggplot(data = pdata, aes(x=slot_mean, y=y, group=sample_bin)) +
+plt = ggplot(data = pdata, aes(x=slot_mean, y=y, group=sample_bin)) +
   
   .myPlot+
   geom_vline(xintercept=0, color="grey", alpha=.75) +
@@ -48,14 +46,14 @@ p.ChoiceBiases.FirstSampleBias = ggplot(data = pdata, aes(x=slot_mean, y=y, grou
   geom_line(aes(color=sample_bin), linewidth=.linewidth) +
   
   labs(y="Pr(Play)", x="Slot Machine Mean (SD = 2)", color="Sample") +
-  coord_cartesian(xlim=c(-2,2), ylim=c(0,1), expand=F) +
-  scale_color_gradient(low="#FF0000", high="#00FF00") +
-  scale_fill_gradient(low="#FF0000", high="#00FF00") +
+  coord_cartesian(xlim=c(-2,2), ylim=c(0,1), expand=F) + 
+  .gradientOpt +
   theme(
-    legend.position = c(.09, .74)
-  )
+    legend.position = c(.88, .3)
+  ) +
+  annotate("text", x = -1.99, y = .99, label="First Sample", color="Black", hjust=0, vjust=1, size=8)
 
-p.ChoiceBiases.FirstSampleBias = p.ChoiceBiases.FirstSampleBias +
+plt = plt +
   theme(plot.background = element_rect(fill = .color_e, color = .color_e))
 
-ggsave(file.path(.figdir, "ChoiceBiases_FirstSampleBias.pdf"), p.ChoiceBiases.FirstSampleBias, width=.figw, height=.figh)
+ggsave(file.path(.figdir, "ChoiceBiases_FirstSampleBias.pdf"), plt, width=.figw, height=.figh)

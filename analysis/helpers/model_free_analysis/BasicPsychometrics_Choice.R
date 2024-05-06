@@ -12,7 +12,7 @@ set.seed(4)
 library(tidyverse)
 source(file.path(.utildir,"getAllUtilities.R"))
 
-load(file.path(.datadir, "exploratory", "data.RData"))
+load(file.path(.datadir, dataset, "data.RData"))
 
 
 ############################
@@ -34,7 +34,7 @@ pdata = data %>%
 # Plot
 ############################
 
-p.BasicPsycho.Choice = ggplot(data = pdata, aes(x=slot_mean, y=y)) +
+plt = ggplot(data = pdata, aes(x=slot_mean, y=y)) +
   
   .myPlot+
   geom_hline(yintercept=.5, color="grey", alpha=.75) +
@@ -47,7 +47,7 @@ p.BasicPsycho.Choice = ggplot(data = pdata, aes(x=slot_mean, y=y)) +
   coord_cartesian(xlim=c(-2,2), ylim=c(0,1), expand=F) + 
   scale_y_continuous(breaks=c(0, .5, 1))
 
-p.BasicPsycho.Choice = p.BasicPsycho.Choice +
+plt = plt +
   theme(plot.background = element_rect(fill = .color_e, color = .color_e))
 
-ggsave(file.path(.figdir, "BasicPsycho_Choice.pdf"), p.BasicPsycho.Choice, width=.figw, height=.figh)
+ggsave(file.path(.figdir, "BasicPsycho_Choice.pdf"), plt, width=.figw, height=.figh)

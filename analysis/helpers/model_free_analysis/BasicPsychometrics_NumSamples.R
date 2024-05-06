@@ -12,7 +12,7 @@ set.seed(4)
 library(tidyverse)
 source(file.path(.utildir,"getAllUtilities.R"))
 
-load(file.path(.datadir, "exploratory", "data.RData"))
+load(file.path(.datadir, dataset, "data.RData"))
 
 
 ############################
@@ -34,7 +34,7 @@ pdata = data[data$lastSample==T, ] %>%
 # Plot
 ############################
 
-p.BasicPsycho.NumSamples = ggplot(data = pdata, aes(x=slot_mean, y=y)) +
+plt = ggplot(data = pdata, aes(x=slot_mean, y=y)) +
   
   .myPlot+
   geom_vline(xintercept=0, color="grey", alpha=.75) +
@@ -45,7 +45,7 @@ p.BasicPsycho.NumSamples = ggplot(data = pdata, aes(x=slot_mean, y=y)) +
   labs(y="Number of Samples", x="Slot Machine Mean (SD = 2)") +
   coord_cartesian(xlim=c(-2,2), expand=F)
 
-p.BasicPsycho.NumSamples = p.BasicPsycho.NumSamples +
+plt = plt +
   theme(plot.background = element_rect(fill = .color_e, color = .color_e))
 
-ggsave(file.path(.figdir, "BasicPsycho_NumSamples.pdf"), p.BasicPsycho.NumSamples, width=.figw, height=.figh)
+ggsave(file.path(.figdir, "BasicPsycho_NumSamples.pdf"), plt, width=.figw, height=.figh)

@@ -95,7 +95,7 @@ data = data %>%
   mutate(parcode = cur_group_id())
 
 # make it pretty
-.voi = c("IDnumber", "parcode", "trial", "choice", "rt", "correct", "slot_mean", "slot_sd", "sample", "raw_sample", "sample_num", "fix_dur", "firstSample", "middleSample", "lastSample")
+.voi = c("parcode", "trial", "choice", "rt", "correct", "slot_mean", "slot_sd", "sample_bin", "sample_num", "fix_dur", "firstSample", "middleSample", "lastSample", "IDnumber", "sample", "raw_sample", "sample_vector")
 data = data[order(data$parcode, data$trial, data$sample_num), .voi]
 
 # save

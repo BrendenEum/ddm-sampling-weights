@@ -13,14 +13,12 @@ library(tidyverse)
 library(ggsci)
 source(file.path(.utildir,"getAllUtilities.R"))
 
-load(file.path(.datadir, "exploratory", "data.RData"))
+load(file.path(.datadir, dataset, "data.RData"))
 
 
 ############################
 # Data for plot
 ############################
-
-data$sample_bin <- data$sample %>% round()
 
 pdata = data[data$middleSample==T, ] %>%
   group_by(parcode, slot_mean, sample_bin) %>%
@@ -39,7 +37,7 @@ pdata = na.omit(pdata)
 # Plot
 ############################
 
-p.ChoiceBiases.MiddleSampleBias = ggplot(data = pdata, aes(x=slot_mean, y=y, group=sample_bin)) +
+plt = ggplot(data = pdata, aes(x=slot_mean, y=y, group=sample_bin)) +
   
   .myPlot+
   geom_vline(xintercept=0, color="grey", alpha=.75) +
@@ -49,10 +47,10 @@ p.ChoiceBiases.MiddleSampleBias = ggplot(data = pdata, aes(x=slot_mean, y=y, gro
   
   labs(y="Pr(Play)", x="Slot Machine Mean (SD = 2)", color="Sample") +
   coord_cartesian(xlim=c(-2,2), ylim=c(0,1), expand=F) +
-  scale_color_gradient(low="#FF0000", high="#00FF00") +
-  scale_fill_gradient(low="#FF0000", high="#00FF00")
+  .gradientOpt +
+  annotate("text", x = -1.99, y = .99, label="Middle Samples", color="Black", hjust=0, vjust=1, size=8)
 
-p.ChoiceBiases.MiddleSampleBias = p.ChoiceBiases.MiddleSampleBias +
+plt = plt +
   theme(plot.background = element_rect(fill = .color_e, color = .color_e))
 
-ggsave(file.path(.figdir, "ChoiceBiases_MiddleSampleBias.pdf"), p.ChoiceBiases.MiddleSampleBias, width=.figw, height=.figh)
+ggsave(file.path(.figdir, "ChoiceBiases_MiddleSampleBias.pdf"), plt, width=.figw, height=.figh)

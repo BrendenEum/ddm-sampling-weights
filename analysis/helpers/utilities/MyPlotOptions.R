@@ -6,7 +6,7 @@
 
 .myPlot = list(
   theme_bw(),
-  coord_cartesian(expand=F),
+  coord_cartesian(expand=F, default=T),
   #scale_color_manual(values=.gainlosscolors),
   #scale_fill_manual(values=.gainlosscolors),
   theme(
@@ -24,6 +24,11 @@
     legend.title = element_text(size = 12),
     legend.text = element_text(size = 12)
   )
+)
+
+.gradientOpt = list(
+  scale_color_gradientn(colors = c("#7B241C", "#CD6155", "#E6B0AA", "#7DCEA0", "#229954", "#145A32")),
+  scale_fill_gradientn(colors = c("#FF0000", "#FF0000", "#FF0000", "#00FF00", "#00FF00", "#00FF00"))
 )
 
 .linewidth = 1.5

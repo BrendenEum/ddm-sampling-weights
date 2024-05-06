@@ -7,6 +7,7 @@ set.seed(4)
 .utildir = file.path("analysis/helpers/utilities")
 .tempdir = file.path("analysis/output/temp")
 library(tidyverse)
+library(stringr)
 source(file.path(.utildir,"getAllUtilities.R"))
 
 .raw_data = read.csv("data/raw_data/data_exp_135720-v6/data_exp_135720-v6_task-ute6.csv")
@@ -72,6 +73,20 @@ data$sample <- cut(data$raw_sample, breaks=breaks, labels=labels) %>%
   as.character() %>%
   as.numeric()
 
+breaks = c(-Inf, -2, -1, 0, 1, 2, Inf)
+labels = c(-2.5, -1.5, -.5, .5, 1.5, 2.5)
+data$sample_bin <- cut(data$sample, breaks=breaks, labels=labels) %>%
+  as.character() %>% as.numeric()
+
+sample_vector_df = data %>%
+  group_by(IDnumber, trial) %>%
+  summarize(sample_vector = str_c(sample, collapse=",")) # Length of this vector = the number of fixations in fixation data (ie. max(sample_num)).)
+data = merge(data, sample_vector_df, by=c("IDnumber", "trial"))
+
+# Making simulation data only requires the 1st subject's data since all subjects see the same trials, in random order.
+#simdata = data[data$IDnumber==first(unique(data$IDnumber)), ]
+#save(simdata, file=file.path(.tempdir, "long_data_for_sims.RData"))
+
 
 ############################
 # Drop evid obs that weren't observed
@@ -103,7 +118,7 @@ data = data %>%
 # Save the final dataset as temp (need to filter and split)
 ############################
 
-.voi = c("IDnumber", "trial", "choice", "rt", "correct", "slot_mean", "slot_sd", "sample", "raw_sample", "sample_num", "fix_dur", "firstSample", "middleSample", "lastSample")
+.voi = c("trial", "choice", "rt", "correct", "slot_mean", "slot_sd", "sample_bin", "sample_num", "fix_dur", "firstSample", "middleSample", "lastSample", "IDnumber", "sample", "raw_sample", "sample_vector")
 data = data[,.voi]
 save(data, file=file.path(.tempdir, "cleaned_data.RData"))
 print("[NAs introduced by coercion] error is ok!")

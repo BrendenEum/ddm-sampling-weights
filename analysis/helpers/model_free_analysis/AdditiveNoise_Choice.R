@@ -10,45 +10,45 @@ set.seed(4)
 .textdir = file.path("analysis/output/text/")
 .datadir = file.path("data/processed_data")
 library(tidyverse)
-library(ggsci)
 source(file.path(.utildir,"getAllUtilities.R"))
 
-load(file.path(.datadir, "exploratory", "data.RData"))
+load(file.path(.datadir, dataset, "data.RData"))
 
 
 ############################
 # Data for plot
 ############################
 
-pdata = data[data$firstSample==T, ] %>%
-  group_by(parcode, sample) %>%
+pdata = data %>%
+  group_by(parcode, slot_mean) %>%
   summarize(
-    mean_rt = mean(rt)
+    mean_choice = mean(choice),
+    sd_choice = sqrt(mean_choice*(1-mean_choice))
   ) %>%
-  group_by(sample) %>%
+  group_by(slot_mean) %>%
   summarize(
-    y = mean(mean_rt),
-    se = SE(mean_rt)
+    y = mean(sd_choice),
+    se = SE(sd_choice)
   )
-
-pdata = na.omit(pdata)
 
 ############################
 # Plot
 ############################
 
-p.ChoiceProcess.RT_FirstSample = ggplot(data = pdata, aes(x=sample, y=y)) +
+plt = ggplot(data = pdata, aes(x=slot_mean, y=y)) +
   
   .myPlot+
+  geom_hline(yintercept=.5, color="grey", alpha=.75) +
   geom_vline(xintercept=0, color="grey", alpha=.75) +
   
-  geom_ribbon(aes(ymin=y-se, ymax=y+se), alpha=.ribbonalpha*.75, show.legend=F) +
+  geom_ribbon(aes(ymin=y-se, ymax=y+se), alpha=.ribbonalpha) +
   geom_line(linewidth=.linewidth) +
   
-  labs(y="RT (s)", x="First Sample", color="Sample") +
-  coord_cartesian(expand=F)
+  labs(y="SD(Choice)", x="Slot Machine Mean (SD = 2)") +
+  coord_cartesian(xlim=c(-2,2), ylim=c(0,1), expand=F) + 
+  scale_y_continuous(breaks=c(0, .5, 1))
 
-p.ChoiceProcess.RT_FirstSample = p.ChoiceProcess.RT_FirstSample +
+plt = plt +
   theme(plot.background = element_rect(fill = .color_e, color = .color_e))
 
-ggsave(file.path(.figdir, "ChoiceProcess_RT_FirstSample.pdf"), p.ChoiceProcess.RT_FirstSample, width=.figw, height=.figh)
+ggsave(file.path(.figdir, "AdditiveNoise_Choice.pdf"), plt, width=.figw, height=.figh)
