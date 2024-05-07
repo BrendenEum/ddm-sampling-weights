@@ -78,6 +78,11 @@ labels = c(-2.5, -1.5, -.5, .5, 1.5, 2.5)
 data$sample_bin <- cut(data$sample, breaks=breaks, labels=labels) %>%
   as.character() %>% as.numeric()
 
+#data = data %>%
+#  group_by(IDnumber, trial) %>%
+#  mutate(sample_num = row_number())
+#data = data[data$sample_num <= 40, ] # there are a maximum of 40 samples per trial
+
 sample_vector_df = data %>%
   group_by(IDnumber, trial) %>%
   summarize(sample_vector = str_c(sample, collapse=",")) # Length of this vector = the number of fixations in fixation data (ie. max(sample_num)).)

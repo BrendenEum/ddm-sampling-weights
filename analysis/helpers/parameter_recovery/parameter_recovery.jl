@@ -1,10 +1,4 @@
-# Author: Brenden Eum (2024)
-# If running this in vscode locally, you need to open up a shell REPL, run 'julia --project=<toolboxdir>', and run 'include("<yourscript.jl>")'. This opens julia with the ADDM environment and runs your code.
-
-##################################################################################################################
-# Preamble
-##################################################################################################################
-
+# include("analysis/helpers/parameter_recovery/parameter_recovery.jl")
 
 #############
 # Libraries and settings
@@ -15,247 +9,71 @@ using DataFrames
 using Random, Distributions, StatsBase
 using Base.Threads
 using Dates
-seed = 1337;
-simCount = 20; # how many simulations to run per data generating process?
-include("sim_and_fit.jl")
-"""
-These options are the defaults for the arguments in sim_and_fit().
-timeStep = 10.0; # ms
-approxStateStep = 0.01; # the approximate resolution of the relative-decision-variable space
-simCutoff = 20000; # maximum decision time for one simulated choice
-verbose = true; # show progress
-"""
+Random.seed!(1337);
+dataset = replace(read("analysis/helpers/utilities/currentDataset.R", String), "dataset <- " => "", "'" => "");
 
-
-#############
-# Prep experiment data
-#############
-expdata = "expdataGain.csv";
-fixdata = "fixationsGain.csv";
-data = ADDM.load_data_from_csv(expdata, fixdata; stimsOnly=true);
-nTrials = 81;
-Stims_Gain = (valueLeft = reduce(vcat, [[i.valueLeft for i in data[j]] for j in keys(data)])[1:nTrials], valueRight = reduce(vcat, [[i.valueRight for i in data[j]] for j in keys(data)])[1:nTrials]);
-Fixations_Gain = ADDM.process_fixations(data, fixDistType="simple");
-expdata = "expdataLoss.csv";
-fixdata = "fixationsLoss.csv";
-data = ADDM.load_data_from_csv(expdata, fixdata; stimsOnly=true);
-nTrials = 81;
-Stims_Loss = (valueLeft = reduce(vcat, [[i.valueLeft for i in data[j]] for j in keys(data)])[1:nTrials], valueRight = reduce(vcat, [[i.valueRight for i in data[j]] for j in keys(data)])[1:nTrials]);
-Fixations_Loss = ADDM.process_fixations(data, fixDistType="simple");
-
-
-#############
-# Prep likelihood and simulator functions
-#############
-include("custom_functions/aDDM_likelihood.jl")
-include("custom_functions/aDDM_simulator.jl")
-include("custom_functions/AddDDM_likelihood.jl")
-include("custom_functions/AddDDM_simulator.jl")
-include("custom_functions/RaDDM_likelihood.jl")
-include("custom_functions/RaDDM_simulator.jl")
-
-
-#############
-# Prep parameter grid (param_grid)
-#############
-include("make_parameter_grid.jl")
-
-#############
-# Prep output folder
-#############
-prdir = "../../outputs/temp/parameter_recovery/" * Dates.format(now(), "yyyy.mm.dd.H.M") * "/";
+## Prep output folder
+prdir = "analysis/output/temp/parameter_recovery/" * Dates.format(now(), "yyyy.mm.dd-H.M") * "/";
 mkpath(prdir);
 
-"""
-##################################################################################################################
-# GEN: Standard aDDM
-##################################################################################################################
-m = "aDDM"      # ! ! !
-println("== GEN: " * m * " ==")
-flush(stdout)
-outdir = prdir * "/" * m * "/";
-mkpath(outdir);
-simulator_fn = aDDM_simulator      # ! ! !
+## Settings (! ! !)
+simCount = 4; # How many simulations?
+timeStep = 10.0; # Time step size (ms) for support of time dimension.
+stateStep = .01; # State step size for support of RDV space.
+simCutoff = 100000;
 
 
-############# 
-# Gain
 #############
-condition = "Gain"
-println("= "*condition*" =")
-flush(stdout)
-Random.seed!(seed)
+# Simulate
+#############
 
-# SIM: Parameters      # ! ! !
-model_list = Any[];
-for i in 1:simCount
-    model = ADDM.define_model(
-        d = sample([.003, .0045, .006, .0075]),
-        σ = sample([.03, .045, .06, .075]),
-        θ = sample([0, .25, .5, .75, .9]),
-        bias = sample([-.2, -.1, 0, .1, .2]),
-        nonDecisionTime = 100,
-        decay = 0
-    )
-    push!(model_list, model);
+## Prep simulation data
+expdata = "data/processed_data/"*dataset*"/expsimdata.csv";
+fixdata = "data/processed_data/"*dataset*"/fixsimdata.csv";
+data = ADDM.load_data_from_csv(expdata, fixdata; stimsOnly=true);
+nTrials = 300;
+MyStims = (
+    valueLeft = reduce(vcat, [[i.valueLeft for i in data[j]] for j in keys(data)])[1:nTrials], 
+    valueRight = reduce(vcat, [[i.valueRight for i in data[j]] for j in keys(data)])[1:nTrials],
+    sample_vector = reduce(vcat, [[i.sample_vector for i in data[j]] for j in keys(data)])[1:nTrials]
+);
+MyFixData = ADDM.process_fixations(data, fixDistType="simple");
+
+## Simulate
+#Threads.@threads for m in 1:simCount
+MyModel = ADDM.define_model(
+    d = .007, #sample([.005, .007, .009]),
+    σ = .05, #sample([.03, .05, .07]),
+    θ = 0.0,
+    bias = 0, #sample([-.1, 0, .1]),
+    barrier = 1,
+    decay = 0.0,
+    nonDecisionTime = 100
+);
+prettyModel = [MyModel.d, MyModel.σ, MyModel.bias, MyModel.nonDecisionTime];
+MyArgs = (timeStep = timeStep, cutOff = simCutoff, fixationData = MyFixData);
+SimData = ADDM.simulate_data(MyModel, MyStims, ADDM.aDDM_simulate_trial, MyArgs);
+
+## Save model and simulation data
+write(prdir*"model.txt", string(prettyModel));
+
+global simput = DataFrame();
+for (i, cur_trial) in enumerate(SimData)
+    # "parcode","trial","rt","choice","sample_vector"
+    cur_beh_df = DataFrame(:trial => i, :choice => cur_trial.choice, :rt => cur_trial.RT, :sample_vector => cur_trial.sample_vector);
+    global simput = vcat(simput, cur_beh_df, cols=:union);
 end
-
-# FIT
-fixed_params = Dict(:barrier=>1, :nonDecisionTime=>100, :decay=>0.0)
-
-# DO SIM AND FIT
-sim_and_fit(model_list, condition, simulator_fn, param_grid_Gain, fixed_params)
+CSV.write(prdir * "SimData.csv", simput);
+#end
 
 
-############# 
-# Loss
 #############
-condition = "Loss"
-println("= "*condition*" =")
-flush(stdout)
-Random.seed!(seed)
-
-# SIM: Parameters      # ! ! !
-model_list = Any[];
-for i in 1:simCount
-    model = ADDM.define_model(
-        d = sample([.003, .0045, .006, .0075]),
-        σ = sample([.03, .045, .06, .075]),
-        θ = sample([1.1, 1.25, 1.5, 1.75, 2]),
-        bias = sample([-.2, -.1, 0, .1, .2]),
-        nonDecisionTime = 100,
-        decay = 0
-    ) 
-    push!(model_list, model);
-end
-
-# FIT
-fixed_params = Dict(:barrier=>1, :nonDecisionTime=>100, :decay=>0.0)
-
-# DO SIM AND FIT
-sim_and_fit(model_list, condition, simulator_fn, param_grid_Loss, fixed_params)
-
-
-##################################################################################################################
-# GEN: Additive aDDM
-##################################################################################################################
-m = "AddDDM"      # ! ! !
-println("== GEN: " * m * " ==")
-flush(stdout)
-outdir = prdir * "/" * m * "/";
-mkpath(outdir);
-simulator_fn = AddDDM_simulator      # ! ! !
-
-
-############# 
-# Gain
+# Recover
 #############
-condition = "Gain"
-println("= "*condition*" =")
-flush(stdout)
-Random.seed!(seed)
 
-# SIM: Parameters      # ! ! !
-model_list = Any[];
-for i in 1:simCount
-    model = ADDM.define_model(
-        d = sample([.003, .0045, .006, .0075]),
-        σ = sample([.03, .045, .06, .075]),
-        η = sample([.005, .01, .015, .02]),
-        bias = sample([-.2, -.1, 0, .1, .2]),
-        nonDecisionTime = 100,
-        decay = 0
-    ) 
-    push!(model_list, model);
-end
+fn = "analysis/helpers/parameter_recovery/param_grid.csv";
+tmp = DataFrame(CSV.File(fn, delim=","));
+param_grid = NamedTuple.(eachrow(tmp));
 
-#FIT
-fixed_params = Dict(:barrier=>1, :nonDecisionTime=>100, :decay=>0.0)
-
-# DO SIM AND FIT
-sim_and_fit(model_list, condition, simulator_fn, param_grid_Gain, fixed_params)
-
-
-############# 
-# Loss
-#############
-condition = "Loss"
-println("= "*condition*" =")
-flush(stdout)
-Random.seed!(seed)
-
-# SIM: Parameters [SAME AS IN GAINS]
-
-# DO SIM AND FIT
-sim_and_fit(model_list, condition, simulator_fn, param_grid_Loss, fixed_params)
-
-"""
-##################################################################################################################
-# GEN: Reference-Dependent aDDM
-##################################################################################################################
-m = "RaDDM"      # ! ! !
-println("== GEN: " * m * " ==")
-flush(stdout)
-outdir = prdir * "/" * m * "/";
-mkpath(outdir);
-simulator_fn = RaDDM_simulator      # ! ! !
-
-
-############# 
-# Gain
-#############
-condition = "Gain"
-println("= "*condition*" =")
-flush(stdout)
-Random.seed!(seed)
-
-# SIM: Parameters      # ! ! !
-model_list = Any[];
-for i in 1:simCount
-    model = ADDM.define_model(
-        d = sample([.003, .0045, .006, .0075]),
-        σ = sample([.03, .045, .06, .075]),
-        θ = sample([0, .25, .5, .75, .9]),
-        bias = sample([-.2, -.1, 0, .1, .2]),
-        nonDecisionTime = 100,
-        decay = 0
-    ) 
-    model.reference = sample([1.0, 0.0, -1.0])
-    push!(model_list, model);
-end
-
-#FIT
-fixed_params = Dict(:barrier=>1, :nonDecisionTime=>100, :decay=>0.0)
-
-# DO SIM AND FIT
-sim_and_fit(model_list, condition, simulator_fn, param_grid_Gain, fixed_params)
-
-
-############# 
-# Loss
-#############
-condition = "Loss"
-println("= "*condition*" =")
-flush(stdout)
-Random.seed!(seed)
-
-# SIM: Parameters      # ! ! !
-model_list = Any[];
-for i in 1:simCount
-    model = ADDM.define_model(
-        d = sample([.003, .0045, .006, .0075]),
-        σ = sample([.03, .045, .06, .075]),
-        θ = sample([0, .25, .5, .75, .9]),
-        bias = sample([-.2, -.1, 0, .1, .2]),
-        nonDecisionTime = 100,
-        decay = 0
-    ) 
-    model.reference = sample([-6.0, 0.0, -8.0])
-    push!(model_list, model);
-end
-
-#FIT
-fixed_params = Dict(:barrier=>1, :nonDecisionTime=>100, :decay=>0.0)
-
-# DO SIM AND FIT
-sim_and_fit(model_list, condition, simulator_fn, param_grid_Loss, fixed_params)
+fixed_params = Dict(:θ=>0.0, :η=>0.0, :barrier=>1, :decay=>0, :nonDecisionTime=>100);
+output = ADDM.grid_search(SimData, param_grid, ADDM.aDDM_get_trial_likelihood, fixed_params; likelihood_args = (timeStep = timeStep, stateStep = stateStep), return_grid_nlls = true);

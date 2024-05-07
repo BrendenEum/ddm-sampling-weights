@@ -37,7 +37,7 @@ Generate a DDM trial given the item values.
 - An Trial object resulting from the simulation.
 """
 function aDDM_simulate_trial(;model::aDDM, fixationData::FixationData, 
-                        valueLeft::Number, valueRight::Number, 
+                        valueLeft::Number, valueRight::Number, sample_vector::Vector{Number},
                         timeStep::Number=10.0, numFixDists::Int64=3, fixationDist=nothing, 
                         timeBins=nothing, cutOff::Number=100000)
     
@@ -59,7 +59,7 @@ function aDDM_simulate_trial(;model::aDDM, fixationData::FixationData,
     barrierDown = -model.barrier ./ (1 .+ model.decay .* (0:cutOff-1))
     
     # Sample and iterate over the latency for this trial.
-    latency = rand(fixationData.latencies)
+    latency = 0
     remainingNDT = model.nonDecisionTime - latency
 
     # This will not change anything (i.e. move the RDV) if there is no latency data in the fixations
@@ -94,51 +94,15 @@ function aDDM_simulate_trial(;model::aDDM, fixationData::FixationData,
     push!(fixTime, latency - (latency % timeStep))
     trialTime += latency - (latency % timeStep)
 
-    fixNumber = 1
-    prevFixItem = -1
     currFixLocation = 0
     decisionReached = false
 
     # Begin decision related accummulation
     cumTimeStep = 0
     while true
-        if currFixLocation == 0
-            # This is an item fixation; sample its location.
-            if prevFixItem == -1
-                # Sample the first item fixation for this trial.
-                currFixLocation = rand(Bernoulli(1 - fixationData.probFixLeftFirst)) + 1
-            elseif prevFixItem in [1, 2]
-                currFixLocation = abs(3 - prevFixItem)
-            end
-            prevFixItem = currFixLocation
-
-            # Sample the duration of this item fixation.
-            if fixationDist === nothing
-                if fixationData.fixDistType == "simple"
-                    currFixTime = rand(reduce(vcat, fixationData.fixations[fixNumber]))
-                elseif fixationData.fixDistType == "difficulty" # maybe add reduce() like in simple
-                    valueDiff = abs(valueLeft - valueRight)
-                    currFixTime = rand(fixationData.fixations[fixNumber][valueDiff][1])
-                elseif fixationData.fixDistType == "fixation"
-                    valueDiff = fixUnfixValueDiffs[currFixLocation]
-                    #[1] is here to make sure it's not sampling from 1-element Vector but from the array inside it
-                    currFixTime = rand(fixationData.fixations[fixNumber][valueDiff][1]) 
-                end
-            else 
-              valueDiff = fixUnfixValueDiffs[currFixLocation]
-              currFixTime = sample(timeBins, Weights(fixationDist[fixNumber][valueDiff]))
-            end
-
-            if fixNumber < numFixDists
-                fixNumber += 1
-            end
-
-        else
-            # This is a transition.
-            currFixLocation = 0
-            #Sample the duration of this transition.
-            currFixTime = rand(fixationData.transitions)
-        end
+        
+        currFixLocation += 1
+        currFixTime = 300
 
         # Iterate over the remaining non-decision time remaining after the latency
         # This can span more than first fixation depending on the first fixation duration
@@ -177,17 +141,11 @@ function aDDM_simulate_trial(;model::aDDM, fixationData::FixationData,
         # Iterate over the duration of the current fixation.
         # Does not move RDV if there is no fixation time left due to NDT
         for t in 1:Int64(remainingFixTime ÷ timeStep)
-            # We use a distribution to model changes in RDV
-            # stochastically. The mean of the distribution (the change
-            # most likely to occur) is calculated from the model
-            # parameters and from the values of the two items.
-            if currFixLocation == 0
-                μ = 0
-            elseif currFixLocation == 1
-                μ = model.d * ( (valueLeft + model.η) - (model.θ * valueRight))
-            elseif currFixLocation == 2
-                μ = model.d * ((model.θ * valueLeft) - (valueRight + model.η))
+            
+            if currFixLocation > length(sample_vector)
+                push!(sample_vector, sample(sample_vector))
             end
+            μ = model.d * sample_vector[currFixLocation]
 
             # Sample the change in RDV from the distribution.
             RDV += rand(Normal(μ, model.σ))
@@ -211,6 +169,7 @@ function aDDM_simulate_trial(;model::aDDM, fixationData::FixationData,
                 decisionReached = true
                 break
             end
+
         end
 
         # Break out of the while loop if decision reached during NDT
@@ -227,7 +186,7 @@ function aDDM_simulate_trial(;model::aDDM, fixationData::FixationData,
 
     end
 
-    trial = Trial(choice = choice, RT = RT, valueLeft = valueLeft, valueRight = valueRight)
+    trial = Trial(choice = choice, RT = RT, valueLeft = valueLeft, valueRight = valueRight, sample_vector = sample_vector)
     trial.fixItem = fixItem 
     trial.fixTime = fixTime 
     trial.fixRDV = fixRDV
@@ -337,6 +296,7 @@ function simulate_data(model::aDDM, stimuli, simulator_fn, simulator_args = (tim
   # Extract valueLeft and valueRight from stimuli
   valueLefts = stimuli.valueLeft
   valueRights = stimuli.valueRight
+  sample_vector = stimuli.sample_vector
 
   # Feed the model and the stimuli to the simulator function
   n = length(valueLefts) # length of stimuli
@@ -350,7 +310,7 @@ function simulate_data(model::aDDM, stimuli, simulator_fn, simulator_args = (tim
     # The `simulator_args...` notation maps the NamedTuple to the kwargs of the simulator_fn
     # The named tuple `simulator_args` does not have to have all the kwargs
     # Additional kwargs can be specified before or after `simulator_args`
-    SimData[i] = simulator_fn(;model = model, valueLeft = valueLefts[i], valueRight = valueRights[i], simulator_args...)
+    SimData[i] = simulator_fn(;model = model, valueLeft = valueLefts[i], valueRight = valueRights[i], sample_vector = sample_vector[i], simulator_args...)
   end
 
   return SimData

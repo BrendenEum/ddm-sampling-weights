@@ -41,13 +41,13 @@ function load_data_from_csv(expdataFileName, fixationsFileName = nothing; stimsO
       if (!("parcode" in names(df)) || !("trial" in names(df)) || !("item_left" in names(df)) || !("item_right" in names(df)))
         throw(error("Missing field in stims data file. Fields required: parcode, trial, item_left, item_right"))
       end
-      cols = [:trial, :item_left, :item_right]
+      cols = [:trial, :item_left, :item_right, :sample_vector]
     else
       if (!("parcode" in names(df)) || !("trial" in names(df)) || !("rt" in names(df)) || !("choice" in names(df))
         || !("item_left" in names(df)) || !("item_right" in names(df)))
         throw(error("Missing field in experimental data file. Fields required: parcode, trial, rt, choice, item_left, item_right"))
       end
-      cols = [:trial, :rt, :choice, :item_left, :item_right]
+      cols = [:trial, :rt, :choice, :item_left, :item_right, :sample_vector]
     end
     
     # Organize csv that was read in into a dictionary indexed by subject id's
@@ -58,14 +58,14 @@ function load_data_from_csv(expdataFileName, fixationsFileName = nothing; stimsO
         parcode_df = df[df.parcode .== subjectId, cols]
         trialIds = unique(parcode_df.trial) 
         for trialId in trialIds
-            global trial_df = parcode_df[parcode_df.trial .== trialId, cols]
+            trial_df = parcode_df[parcode_df.trial .== trialId, cols]
             itemLeft = trial_df.item_left[1]
             itemRight = trial_df.item_right[1]
-            sample_vector = trial_df.sample_vector[1]
+            sample_vector = parse.(Float64, strip.(split(trial_df.sample_vector[1], ",")))
             if stimsOnly
-              push!(data[subjectId], Trial(choice = NaN, RT = NaN, valueLeft = itemLeft, valueRight = itemRight, samples = sample_vector) ) 
+              push!(data[subjectId], Trial(choice = NaN, RT = NaN, valueLeft = itemLeft, valueRight = itemRight, sample_vector = sample_vector) ) 
             else
-              push!(data[subjectId], Trial(choice = trial_df.choice[1], RT = trial_df.rt[1], valueLeft = itemLeft, valueRight = itemRight, samples = sample_vector) ) 
+              push!(data[subjectId], Trial(choice = trial_df.choice[1], RT = trial_df.rt[1], valueLeft = itemLeft, valueRight = itemRight, sample_vector = sample_vector) ) 
             end
         end
     end

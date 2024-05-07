@@ -53,6 +53,7 @@ mutable struct Trial
     RT::Number
     valueLeft::Number
     valueRight::Number
+    sample_vector::Vector{Number}
 
     # Optional components
     fixItem::Vector{Number}
@@ -60,11 +61,10 @@ mutable struct Trial
     fixRDV::Vector{Number}
     uninterruptedLastFixTime::Number
     RDV::Vector{Number}
-    samples::Vector{Number}
 
     # Incomplete initialization allows for defining optional components later
     # To create a Trial one must only provide the choice, RT and values
-    Trial(;choice, RT, valueLeft, valueRight) = new(choice, RT, valueLeft, valueRight)
+    Trial(;choice, RT, valueLeft, valueRight, sample_vector) = new(choice, RT, valueLeft, valueRight, sample_vector)
 end
 
 """
