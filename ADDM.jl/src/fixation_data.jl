@@ -177,9 +177,6 @@ function process_fixations(data::Dict; timeStep::Number = 10,
                     end
                 end
             end
-            # Distribution of last fixation durations
-            fixNumber += 1
-            push!(fixationsList[fixNumber], trial.fixTime[length(trial.fixItem)])
         end
     end
     probFixLeftFirst = countLeftFirst / countTotalTrials

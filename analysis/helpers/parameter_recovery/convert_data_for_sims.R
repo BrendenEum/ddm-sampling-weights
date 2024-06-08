@@ -40,6 +40,7 @@ expsimdata = simdata %>%
     choice = ifelse(first(choice)==1, 1, -1),
     rt = floor(first(rt)*1000),
     sample_vector = first(sample_vector),
+    last_fix_time = floor(last(fix_dur)*1000),
     item_left = 0, # The toolbox requires values for left and right items since it's built for estimating the aDDM. Set these to 0 to ignore.
     item_right = 0 
   )

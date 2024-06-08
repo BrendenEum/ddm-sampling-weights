@@ -19,10 +19,23 @@ Returns:
 function aDDM_get_trial_likelihood(;model::aDDM, trial::Trial, timeStep::Number = 10.0, 
                                    stateStep::Number = 0.01, debug = false)
     
-    # We are treating the last fixation as the non-decision time in this project. Drop the last fixated item and time, unless there's only one fixation in the trial. This never happens in the real data since we control for choices made too quickly. The if-else statement is purely here to deal with rare instances in simulated data.
-    if length(trial.fixItem) > 1
-        correctedFixItem = trial.fixItem[1:end-1]
-        correctedFixTime = trial.fixTime[1:end-1]
+    # Iterate over the fixations and discount the non-decision time.
+    if model.nonDecisionTime > 0
+        correctedFixItem = Number[]
+        correctedFixTime = Number[]
+        remainingNDT = model.nonDecisionTime
+        for (fItem, fTime) in zip(trial.fixItem, trial.fixTime) # iterate through each fixation in the trial
+            if remainingNDT > 0
+                push!(correctedFixItem, 0)
+                push!(correctedFixTime, min(remainingNDT, fTime)) # if the fTime is smaller push that otherwise push ndt
+                push!(correctedFixItem, fItem)
+                push!(correctedFixTime, max(fTime - remainingNDT, 0))
+                remainingNDT = remainingNDT - fTime
+            else
+                push!(correctedFixItem, fItem)
+                push!(correctedFixTime, fTime)
+            end
+        end
     else
         correctedFixItem = trial.fixItem
         correctedFixTime = trial.fixTime
@@ -67,11 +80,17 @@ function aDDM_get_trial_likelihood(;model::aDDM, trial::Trial, timeStep::Number 
     
     # Dictionary of μ values from fItem.
     μDict = Dict{Number, Number}()
-    for fItem in 1:length(trial.sample_vector)
-        μ = (model.d + (model.α/10000) * fItem) * trial.sample_vector[fItem]
+    for fItem in 0:2
+        if fItem == 1
+            μ = model.d * ((trial.valueLeft + model.η) - (model.θ * trial.valueRight))
+        elseif fItem == 2
+            μ = model.d * ((model.θ * trial.valueLeft) - (trial.valueRight + model.η))
+        else
+            μ = 0
+        end
+        
         μDict[fItem] = μ
     end 
-    μDict[0] = 0
     
     changeMatrix = states .- reshape(states, 1, :)
     changeUp = (barrierUp .- reshape(states, 1, :))'
@@ -81,7 +100,7 @@ function aDDM_get_trial_likelihood(;model::aDDM, trial::Trial, timeStep::Number 
     cdfUpDict = Dict{Number, Any}()
     cdfDownDict = Dict{Number, Any}() 
     
-    for fItem in 0:length(trial.sample_vector)
+    for fItem in 0:2
         normpdf = similar(changeMatrix)
         cdfUp = similar(changeUp[:, time])
         cdfDown = similar(changeDown[:, time])

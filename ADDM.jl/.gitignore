@@ -1,0 +1,5 @@
+*Manifest.toml
+/docs/build
+*.png
+/performance/outputs
+docs/src/tutorials/outputs/

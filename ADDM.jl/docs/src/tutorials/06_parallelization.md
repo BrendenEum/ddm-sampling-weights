@@ -1,0 +1,5 @@
+  - Currently, ADDM.jl relies on some embarassingly parallel data parallelization based on ... By default, ... When using on HPCs  
+  - Sample batch scripts   
+  - Include a note on `MPI.jl` to the parallelization tutorial. One/those familiar with Dask can consider `Dagger.jl` especially for hierarchical/nested loop ability but at the time of writing these included too much overhead and were not as performant.  
+  - Include this discussion: https://discourse.julialang.org/t/is-clustermanagers-jl-maintained-or-how-to-do-multi-node-calculations-in-julia/110050/24  
+  - Include this tutorial: https://enccs.github.io/julia-for-hpc/motivation-hpc/  

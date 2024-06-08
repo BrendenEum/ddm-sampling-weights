@@ -38,7 +38,6 @@ Generate a DDM trial given the item values.
 """
 function aDDM_simulate_trial(;model::aDDM, fixationData::FixationData, 
                         valueLeft::Number, valueRight::Number, 
-                        sample_vector::Vector{Number}, last_fix_time::Number,
                         timeStep::Number=10.0, numFixDists::Int64=3, fixationDist=nothing, 
                         timeBins=nothing, cutOff::Number=100000)
     
@@ -58,26 +57,137 @@ function aDDM_simulate_trial(;model::aDDM, fixationData::FixationData,
     # The values of the barriers can change over time.
     barrierUp = model.barrier ./ (1 .+ model.decay .* (0:cutOff-1))
     barrierDown = -model.barrier ./ (1 .+ model.decay .* (0:cutOff-1))
+    
+    # Sample and iterate over the latency for this trial.
+    latency = rand(fixationData.latencies)
+    remainingNDT = model.nonDecisionTime - latency
 
-    # Begin decision related accummulation
+    # This will not change anything (i.e. move the RDV) if there is no latency data in the fixations
+    for t in 1:Int64(latency ÷ timeStep)
+        # Sample the change in RDV from the distribution.
+        RDV += rand(Normal(0, model.σ))
+        push!(tRDV, RDV)
+
+        # If the RDV hit one of the barriers, the trial is over.
+        # No barrier decay before decision-related accummulation
+        if abs(RDV) >= model.barrier
+            choice = RDV >= 0 ? -1 : 1
+            push!(fixRDV, RDV)
+            push!(fixItem, 0)
+            push!(fixTime, t * timeStep)
+            trialTime += t * timeStep
+            RT = trialTime
+            uninterruptedLastFixTime = latency
+            trial = Trial(choice = choice, RT = RT, valueLeft = valueLeft, valueRight = valueRight)
+            trial.fixItem = fixItem 
+            trial.fixTime = fixTime 
+            trial.fixRDV = fixRDV
+            trial.uninterruptedLastFixTime = uninterruptedLastFixTime
+            trial.RDV = tRDV
+            return trial
+        end
+    end
+
+    # Add latency to this trial's data
+    push!(fixRDV, RDV)
+    push!(fixItem, 0)
+    push!(fixTime, latency - (latency % timeStep))
+    trialTime += latency - (latency % timeStep)
+
+    fixNumber = 1
+    prevFixItem = -1
     currFixLocation = 0
     decisionReached = false
+
+    # Begin decision related accummulation
     cumTimeStep = 0
     while true
-        
-        # Fixation patterns
-        currFixLocation += 1
-        currFixTime = 300
+        if currFixLocation == 0
+            # This is an item fixation; sample its location.
+            if prevFixItem == -1
+                # Sample the first item fixation for this trial.
+                currFixLocation = rand(Bernoulli(1 - fixationData.probFixLeftFirst)) + 1
+            elseif prevFixItem in [1, 2]
+                currFixLocation = abs(3 - prevFixItem)
+            end
+            prevFixItem = currFixLocation
+
+            # Sample the duration of this item fixation.
+            if fixationDist === nothing
+                if fixationData.fixDistType == "simple"
+                    currFixTime = rand(reduce(vcat, fixationData.fixations[fixNumber]))
+                elseif fixationData.fixDistType == "difficulty" # maybe add reduce() like in simple
+                    valueDiff = abs(valueLeft - valueRight)
+                    currFixTime = rand(fixationData.fixations[fixNumber][valueDiff][1])
+                elseif fixationData.fixDistType == "fixation"
+                    valueDiff = fixUnfixValueDiffs[currFixLocation]
+                    #[1] is here to make sure it's not sampling from 1-element Vector but from the array inside it
+                    currFixTime = rand(fixationData.fixations[fixNumber][valueDiff][1]) 
+                end
+            else 
+              valueDiff = fixUnfixValueDiffs[currFixLocation]
+              currFixTime = sample(timeBins, Weights(fixationDist[fixNumber][valueDiff]))
+            end
+
+            if fixNumber < numFixDists
+                fixNumber += 1
+            end
+
+        else
+            # This is a transition.
+            currFixLocation = 0
+            #Sample the duration of this transition.
+            currFixTime = rand(fixationData.transitions)
+        end
+
+        # Iterate over the remaining non-decision time remaining after the latency
+        # This can span more than first fixation depending on the first fixation duration
+        # That's why it's not conditioned over the fixation number
+        if remainingNDT > 0
+            for t in 1:Int64(remainingNDT ÷ timeStep)
+                # Sample the change in RDV from the distribution.
+                RDV += rand(Normal(0, model.σ))
+                push!(tRDV, RDV)
+
+                # If the RDV hit one of the barriers, the trial is over.
+                # No barrier decay before decision-related accummulation
+                if abs(RDV) >= model.barrier
+                    choice = RDV >= 0 ? -1 : 1
+                    push!(fixRDV, RDV)
+                    push!(fixItem, currFixLocation)
+                    push!(fixTime, t * timeStep)
+                    trialTime += t * timeStep
+                    RT = trialTime
+                    uninterruptedLastFixTime = currFixTime
+                    decisionReached = true
+                    break
+                end
+            end
+        end
+
+        # Break out of the while loop if decision reached during NDT
+        # The break above only breaks from the NDT for loop
+        if decisionReached
+            break
+        end
+
+        remainingFixTime = max(0, currFixTime - max(0, remainingNDT))
+        remainingNDT -= currFixTime
 
         # Iterate over the duration of the current fixation.
         # Does not move RDV if there is no fixation time left due to NDT
-        for t in 1:Int64(currFixTime ÷ timeStep)
-            
-            if currFixLocation > length(sample_vector)
-                push!(sample_vector, sample(sample_vector))
+        for t in 1:Int64(remainingFixTime ÷ timeStep)
+            # We use a distribution to model changes in RDV
+            # stochastically. The mean of the distribution (the change
+            # most likely to occur) is calculated from the model
+            # parameters and from the values of the two items.
+            if currFixLocation == 0
+                μ = 0
+            elseif currFixLocation == 1
+                μ = model.d * ( (valueLeft) - (model.θ * valueRight)) + model.η
+            elseif currFixLocation == 2
+                μ = model.d * ((model.θ * valueLeft) - (valueRight)) - model.η
             end
-            μ = model.d * sample_vector[currFixLocation]
-            RDV = (model.d + (model.α/10000) * cumTimeStep) * sample_vector[currFixLocation]# + (abs(sample_vector[currFixLocation]) * rand(Normal(0, model.σ)))
 
             # Sample the change in RDV from the distribution.
             RDV += rand(Normal(μ, model.σ))
@@ -101,7 +211,6 @@ function aDDM_simulate_trial(;model::aDDM, fixationData::FixationData,
                 decisionReached = true
                 break
             end
-
         end
 
         # Break out of the while loop if decision reached during NDT
@@ -118,11 +227,7 @@ function aDDM_simulate_trial(;model::aDDM, fixationData::FixationData,
 
     end
 
-    # Because the last stimulus seems to have no impact on choices, I believe a lot of the processes captured by non-decision time is happening at the end of the decision in this task. Therefore, I incorporate non-decision time as time added to the final RT of the simulation.
-    ndt = sample(fixationData.fixations[maximum(keys(fixationData.fixations))][1])
-    RT += ndt
-
-    trial = Trial(choice = choice, RT = RT, valueLeft = valueLeft, valueRight = valueRight, sample_vector = sample_vector, last_fix_time = last_fix_time)
+    trial = Trial(choice = choice, RT = RT, valueLeft = valueLeft, valueRight = valueRight)
     trial.fixItem = fixItem 
     trial.fixTime = fixTime 
     trial.fixRDV = fixRDV
@@ -232,8 +337,12 @@ function simulate_data(model::aDDM, stimuli, simulator_fn, simulator_args = (tim
   # Extract valueLeft and valueRight from stimuli
   valueLefts = stimuli.valueLeft
   valueRights = stimuli.valueRight
-  sample_vector = stimuli.sample_vector
-  last_fix_time = stimuli.last_fix_time
+
+  # BE: Custom extracts from stimuli
+  LProbs = stimuli.LProb
+  LAmts = stimuli.LAmt
+  RProbs = stimuli.RProb
+  RAmts = stimuli.RAmt
 
   # Feed the model and the stimuli to the simulator function
   n = length(valueLefts) # length of stimuli
@@ -247,7 +356,11 @@ function simulate_data(model::aDDM, stimuli, simulator_fn, simulator_args = (tim
     # The `simulator_args...` notation maps the NamedTuple to the kwargs of the simulator_fn
     # The named tuple `simulator_args` does not have to have all the kwargs
     # Additional kwargs can be specified before or after `simulator_args`
-    SimData[i] = simulator_fn(;model = model, valueLeft = valueLefts[i], valueRight = valueRights[i], sample_vector = sample_vector[i], last_fix_time = last_fix_time[i], simulator_args...)
+    SimData[i] = simulator_fn(
+        ;model = model, 
+        valueLeft = valueLefts[i], valueRight = valueRights[i], 
+        LProb = LProbs[i], LAmt = LAmts[i], RProb = RProbs[i], RAmt = RAmts[i],
+        simulator_args...)
   end
 
   return SimData
