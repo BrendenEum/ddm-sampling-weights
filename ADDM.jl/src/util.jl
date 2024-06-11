@@ -70,8 +70,8 @@ function load_data_from_csv(expdataFileName, fixationsFileName = nothing; stimsO
     end
     
     # Add optional data here (reference-dependent values and amts and probabilities)
-    if (!("vL_StatusQuo" in names(df)) || !("vR_StatusQuo" in names(df)) || !("vL_MaxMin" in names(df)) || !("vR_MaxMin" in names(df)) || !("LAmt" in names(df)) || !("LProb" in names(df)) || !("RAmt" in names(df)) || !("RProb" in names(df)))
-      throw(error("Missing field in experimental data file. Fields required: v*_StatusQuo, v*_MaxMin, *Amt, *Prob."))
+    if ( !("sample_vector" in names(df)) )
+      throw(error("Missing field in experimental data file. Fields required: sample_vector."))
     end
 
     for subjectId in subjectIds
@@ -80,15 +80,10 @@ function load_data_from_csv(expdataFileName, fixationsFileName = nothing; stimsO
       for (t, trialId) in enumerate(trialIds)
         trial_df = parcode_df[parcode_df.trial .== trialId, :]
         dataTrial = Matrix(trial_df)
-        data[subjectId][t].vL_StatusQuo = trial_df.vL_StatusQuo[1]
-        data[subjectId][t].vR_StatusQuo = trial_df.vR_StatusQuo[1]
-        data[subjectId][t].vL_MaxMin = trial_df.vL_MaxMin[1]
-        data[subjectId][t].vR_MaxMin = trial_df.vR_MaxMin[1]
-
-        data[subjectId][t].LAmt = trial_df.LAmt[1]
-        data[subjectId][t].LProb = trial_df.LProb[1]
-        data[subjectId][t].RAmt = trial_df.RAmt[1]
-        data[subjectId][t].RProb = trial_df.RProb[1]
+        sample_vectorString = trial_df.sample_vector[1];
+        split_string = split(sample_vectorString, ",");
+        float_vector = [parse(Float64, str) for str in split_string];
+        data[subjectId][t].sample_vector = float_vector;
       end
     end
 
