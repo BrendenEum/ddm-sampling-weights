@@ -55,7 +55,7 @@ MyModel = ADDM.define_model(
     decay = 0.0,
     nonDecisionTime = 0 # We fix NDT to the duration of the last stimulus on a trial-by-trial basis instead.
 );
-#MyModel.α = 3;
+MyModel.k = .5;
 MyArgs = (timeStep = timeStep, cutOff = simCutoff, fixationData = MyFixData);
 SimData = ADDM.simulate_data(MyModel, MyStims, ADDM.aDDM_simulate_trial, MyArgs);
 

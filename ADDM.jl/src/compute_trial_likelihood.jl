@@ -68,8 +68,8 @@ function aDDM_get_trial_likelihood(;model::aDDM, trial::Trial, timeStep::Number 
     # Dictionary of μ values from fItem.
     μDict = Dict{Number, Number}()
     for fItem in 1:length(trial.sample_vector)
-        #μ = (model.d + (model.α/10000) * fItem) * trial.sample_vector[fItem]
-        μ = model.d * trial.sample_vector[fItem]
+        compressed_value = (trial.sample_vector[fItem]/abs(trial.sample_vector[fItem])) * (abs(trial.sample_vector[fItem])^model.k)
+        μ = model.d * compressed_value
         μDict[fItem] = μ
     end 
     μDict[0] = 0
@@ -86,10 +86,13 @@ function aDDM_get_trial_likelihood(;model::aDDM, trial::Trial, timeStep::Number 
         normpdf = similar(changeMatrix)
         cdfUp = similar(changeUp[:, time])
         cdfDown = similar(changeDown[:, time])
+
+        μ_new = μDict[fItem] #* ((1 + model.α) * (time))
+        σ_new = model.σ #* ((1 + model.α) * (time + 1))
         
-        @. normpdf = pdf(Normal(μDict[fItem], model.σ), changeMatrix)
-        @. cdfUp = cdf(Normal(μDict[fItem], model.σ), changeUp[:, time])
-        @. cdfDown = cdf(Normal(μDict[fItem], model.σ), changeDown[:, time])
+        @. normpdf = pdf(Normal(μ_new, σ_new), changeMatrix)
+        @. cdfUp = cdf(Normal(μ_new, σ_new), changeUp[:, time])
+        @. cdfDown = cdf(Normal(μ_new, σ_new), changeDown[:, time])
         pdfDict[fItem] = normpdf
         cdfUpDict[fItem] = cdfUp
         cdfDownDict[fItem] = cdfDown

@@ -79,10 +79,13 @@ function aDDM_simulate_trial(;model::aDDM, fixationData::FixationData,
             
             # Drift rate
             #μ = ( model.d + ((model.α/10000)*cumTimeStep) ) * sample_vector[currFixLocation]
-            μ = model.d * sample_vector[currFixLocation]
+            compressed_value = (sample_vector[currFixLocation]/abs(sample_vector[currFixLocation])) * (abs(sample_vector[currFixLocation])^model.k)
+            μ = model.d * compressed_value
 
             # Sample the change in RDV from the distribution.
-            RDV += rand(Normal(μ, model.σ))
+            μ_new = μ #* ((1 + model.α) * (cumTimeStep + 1))
+            σ_new = model.σ #* ((1 + model.α) * (cumTimeStep + 1))
+            RDV += rand(Normal(μ_new, σ_new)) 
             push!(tRDV, RDV)
 
             # Increment cumulative timestep to look up the correct barrier value in case there has been a decay
@@ -104,7 +107,6 @@ function aDDM_simulate_trial(;model::aDDM, fixationData::FixationData,
                 decisionReached = true
                 break
             end
-
         end
 
         # Break out of the while loop if decision reached during NDT
