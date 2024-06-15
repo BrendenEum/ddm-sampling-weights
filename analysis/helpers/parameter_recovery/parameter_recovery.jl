@@ -1,9 +1,9 @@
 # julia --project=/Users/brenden/Desktop/ddm-sampling-weights/ADDM.jl --threads=4
 # include("analysis/helpers/parameter_recovery/parameter_recovery.jl")
 
-#############
+#################################################################
 # Libraries and settings
-#############
+#################################################################
 using ADDM
 using CSV
 using DataFrames
@@ -29,11 +29,16 @@ timeStep = 10.0; # Time step size (ms) for support of time dimension.
 stateStep = 0.01; # State step size for support of RDV space.
 simCutoff = 100000;
 
-#############
-# Simulate
-#############
 
-## Prep simulation data
+#################################################################
+# Simulate
+#################################################################
+
+# Prep simulator function
+include("/Users/brenden/Desktop/ddm-sampling-weights/ADDM.jl/custom_simulators/kDDM_simulator.jl")
+simulator_fn = kDDM_simulate_trial;
+
+# Prep simulation data
 expdata = "data/processed_data/"*dataset*"/expsimdata.csv";
 fixdata = "data/processed_data/"*dataset*"/fixsimdata.csv";
 data = ADDM.load_data_from_csv(expdata, fixdata; stimsOnly=true);
@@ -44,7 +49,7 @@ MyStims = (
 );
 MyFixData = ADDM.process_fixations(data, fixDistType="simple");
 
-## Simulate
+# Simulate
 m = 1;
 MyModel = ADDM.define_model(
     d = .004,
@@ -57,9 +62,9 @@ MyModel = ADDM.define_model(
 );
 MyModel.k = .5;
 MyArgs = (timeStep = timeStep, cutOff = simCutoff, fixationData = MyFixData);
-SimData = ADDM.simulate_data(MyModel, MyStims, ADDM.aDDM_simulate_trial, MyArgs);
+SimData = ADDM.simulate_data(MyModel, MyStims, simulator_fn, MyArgs);
 
-## Save model and simulation data
+# Save model and simulation data
 write(prdir*"model_$(m).txt", string(MyModel));
 
 global simput = DataFrame();
@@ -71,23 +76,43 @@ end
 CSV.write(prdir * "SimData_$(m).csv", simput);
 
 
-#############
+#################################################################
 # Recover
-#############
+#################################################################
 
-fn = "analysis/helpers/parameter_recovery/param_grid.csv";
-tmp = DataFrame(CSV.File(fn, delim=","));
+# Prep likelihood fn.
+include("/Users/brenden/Desktop/ddm-sampling-weights/ADDM.jl/custom_likelihoods/kDDM_likelihood.jl");
+
+# Prep parameter grid.
+tmp = DataFrame(CSV.File("analysis/helpers/parameter_recovery/param_grid.csv", delim=","));
+tmp.likelihood_fn .= "kDDM_likelihood";
 param_grid = NamedTuple.(eachrow(tmp));
 
+# Grid search.
 fixed_params = Dict(:θ=>1.0, :η=>0.0, :barrier=>1, :decay=>0.0, :nonDecisionTime=>0.0);
 output = ADDM.grid_search(
-    SimData, param_grid, ADDM.aDDM_get_trial_likelihood, fixed_params; 
+    SimData, param_grid, nothing, fixed_params; 
     likelihood_args = (timeStep = timeStep, stateStep = stateStep), 
-    return_grid_nlls = true#, return_trial_posteriors = true, return_model_posteriors = true
+    return_grid_nlls = true, return_trial_posteriors = false, return_model_posteriors = true
 );
 
+# Store outputs.
 mle = output[:mle];
 nll_df =  sort!(output[:grid_nlls]);
 sort!(nll_df, :nll);
+#trial_posteriors = output[:trial_posteriors];
+model_posteriors = output[:model_posteriors];
+
+# Attach names to the posteriors for each parameter combo.
+combo_posteriors = DataFrame();
+for (k, v) in model_posteriors
+    cur_row = DataFrame([k])
+    cur_row.posterior = [v]
+    combo_posteriors = vcat(combo_posteriors, cur_row, cols=:union)
+end;
+sort!(combo_posteriors, :posterior, rev=true);
+
+# Save.
 CSV.write(prdir * "MLE_$(m).csv", mle);
 CSV.write(prdir * "NLL_$(m).csv", nll_df);
+CSV.write(prdir * "posteriors_$(m).csv", combo_posteriors);
